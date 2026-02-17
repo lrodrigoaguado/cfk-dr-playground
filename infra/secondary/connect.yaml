@@ -1,0 +1,54 @@
+apiVersion: platform.confluent.io/v1beta1
+kind: Connect
+metadata:
+  name: connect
+  namespace: confluent
+spec:
+  replicas: 1
+  podTemplate:
+    resources:
+      limits:
+        memory: 2048Mi
+        cpu: 1500m
+      requests:
+        memory: 1536Mi
+        cpu: 500m
+    probe:
+      liveness:
+        initialDelaySeconds: 300
+      readiness:
+        initialDelaySeconds: 240
+  image:
+    application: confluentinc/cp-server-connect:8.1.0
+    init: confluentinc/confluent-init-container:3.1.0
+  tls:
+    secretRef: connect-tls
+  build:
+    type: onDemand
+    onDemand:
+      plugins:
+        confluentHub:
+          - name: kafka-connect-datagen
+            owner: confluentinc
+            version: 0.6.8
+  dependencies:
+    kafka:
+      bootstrapEndpoint: kafka.confluent.svc.cluster.local:9071
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
+    schemaRegistry:
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
+      url: https://schemaregistry.confluent.svc.cluster.local:8081
+  configOverrides:
+    server:
+      - "sni.host.check.enabled=false"
+      - "offset.storage.replication.factor=1"
+      - "config.storage.replication.factor=1"
+      - "status.storage.replication.factor=1"
+      - "config.providers=file"
+      - "config.providers.file.class=org.apache.kafka.common.config.provider.FileConfigProvider"

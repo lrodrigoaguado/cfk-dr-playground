@@ -1,0 +1,13 @@
+apiVersion: platform.confluent.io/v1beta1
+kind: KafkaRestClass
+metadata:
+  name: primary-remote-restclass
+  namespace: confluent
+spec:
+  kafkaRest:
+    endpoint: https://primary-control-plane:30082
+    authentication:
+      type: mtls
+    tls:
+      secretRef: rest-class-tls
+    kafkaClusterID: "primaryCluster-1234567"

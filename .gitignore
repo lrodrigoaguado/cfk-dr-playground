@@ -1,0 +1,16 @@
+.DS_Store
+.vscode
+
+### IntelliJ IDEA ###
+
+# IDEs
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+
+# Build and local state
+certs/
+password-encoder.txt
+infra/password-encoder-secret.txt

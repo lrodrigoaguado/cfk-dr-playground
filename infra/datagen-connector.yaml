@@ -1,0 +1,24 @@
+apiVersion: platform.confluent.io/v1beta1
+kind: Connector
+metadata:
+  name: datagen-pageviews
+  namespace: confluent
+spec:
+  class: "io.confluent.kafka.connect.datagen.DatagenConnector"
+  taskMax: 1
+  configs:
+    kafka.topic: "product-pageviews"
+    max.interval: "1000"
+    iterations: "-1"
+    schema.string: |
+      {"type":"record","name":"pageview","namespace":"io.confluent.examples.clients.basicavro","fields":[{"name":"viewtime","type":["null","long"],"default":null},{"name":"userid","type":"string"},{"name":"pageid","type":["null","string"],"default":null},{"name":"sequence_number","type":["null","long"],"default":null,"arg.properties":{"iteration":{"start":0}}}]}
+    schema.keyfield: "userid"
+    key.converter: "org.apache.kafka.connect.storage.StringConverter"
+    value.converter: "io.confluent.connect.avro.AvroConverter"
+    value.converter.schema.registry.url: "https://schemaregistry.confluent.svc.cluster.local:8081"
+    value.converter.schema.registry.ssl.truststore.location: "/mnt/sslcerts/truststore.jks"
+    value.converter.schema.registry.ssl.truststore.password: "confluent"
+    value.converter.schema.registry.ssl.keystore.location: "/mnt/sslcerts/keystore.jks"
+    value.converter.schema.registry.ssl.keystore.password: "confluent"
+  connectClusterRef:
+    name: connect

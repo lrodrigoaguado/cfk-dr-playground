@@ -1,0 +1,25 @@
+apiVersion: platform.confluent.io/v1beta1
+kind: SchemaExporter
+metadata:
+  name: primary-schema-exporter
+  namespace: confluent
+spec:
+  contextType: NONE
+  subjects:
+    - "*"
+  sourceCluster:
+    schemaRegistryRest:
+      endpoint: https://schemaregistry.confluent.svc.cluster.local:8081
+      kafkaClusterID: "primaryCluster-1234567"
+      authentication:
+        type: mtls
+      tls:
+        secretRef: rest-class-tls
+  destinationCluster:
+    schemaRegistryRest:
+      endpoint: https://secondary-control-plane:30081
+      kafkaClusterID: "secondaryCluster-12345"
+      authentication:
+        type: mtls
+      tls:
+        secretRef: rest-class-tls

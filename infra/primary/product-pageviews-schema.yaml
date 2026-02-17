@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: product-pageviews-schema
+  namespace: confluent
+data:
+  schema: |
+    {
+      "type": "record",
+      "name": "pageview",
+      "namespace": "io.confluent.examples.clients.basicavro",
+      "fields": [
+        {
+          "name": "viewtime",
+          "type": ["null", "long"],
+          "default": null
+        },
+        {
+          "name": "userid",
+          "type": "string"
+        },
+        {
+          "name": "pageid",
+          "type": ["null", "string"],
+          "default": null
+        },
+        {
+          "name": "sequence_number",
+          "type": ["null", "long"],
+          "default": null
+        }
+      ]
+    }
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: Schema
+metadata:
+  name: product-pageviews-value
+  namespace: confluent
+spec:
+  data:
+    format: avro
+    configRef: product-pageviews-schema
+  name: product-pageviews-value
+  compatibilityLevel: FULL
+  schemaRegistryRest:
+    endpoint: https://schemaregistry.confluent.svc.cluster.local:8081
+    authentication:
+      type: mtls
+    tls:
+      secretRef: rest-class-tls
