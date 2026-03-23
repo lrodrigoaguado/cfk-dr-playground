@@ -4,6 +4,8 @@ kind: KafkaTopic
 metadata:
   name: product-pageviews
   namespace: confluent
+  annotations:
+    platform.confluent.io/delete-on-cr-removal: "true"
 spec:
   kafkaRestClassRef:
     name: primary-cluster-restclass

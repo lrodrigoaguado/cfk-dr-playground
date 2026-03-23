@@ -9,7 +9,7 @@ The playground consists of:
 - **Primary cluster**: Active site generating traffic via a Datagen connector.
 - **Secondary cluster**: Standby site mirroring data via Cluster Linking.
 
-Both clusters run the full Confluent Platform stack (KRaft, Kafka, Schema Registry, Connect, REST Proxy, Control Center).
+Both clusters run the full Confluent Platform stack (KRaft, Kafka, Schema Registry, Connect, REST Proxy, Control Center) with **mTLS** authentication for all component-to-component communication and a minimal **MDS** (Metadata Service) for `confluent` CLI access.
 
 ## Prerequisites
 
@@ -18,6 +18,8 @@ Both clusters run the full Confluent Platform stack (KRaft, Kafka, Schema Regist
 - `kubectl`
 - `helm`
 - `openssl` and `keytool` (included with Java JDK)
+- `confluent` CLI v4.23.0+ ([install guide](https://docs.confluent.io/confluent-cli/current/install.html)) -- needed for Scenario 3 and some administrative operations. Certificate-based login requires v4.23.0+.
+- Confluent Platform or Apache Kafka CLI tools (for Scenario 3 only -- provides `kafka-cluster-links` and `kafka-mirrors` commands)
 
 ## Setup Instructions
 
@@ -43,15 +45,15 @@ kind create cluster --name secondary --image kindest/node:v1.31.0 --config infra
 docker network connect kind-shared secondary-control-plane
 ```
 
-### 3. Generate TLS Certificates & Secrets
+### 3. Generate TLS Certificates, MDS Keys & Secrets
 
-mTLS is used across all components. The CA config lives in `certs/ca/openssl-ca.cnf`.
+TLS is used across all components for transport encryption and mutual authentication. An RSA key pair is generated for MDS token signing.
 
 ```bash
-# Generate certificates for all components
+# Generate certificates and MDS token key pair
 ./generate_certificates.sh
 
-# Create Kubernetes secrets in both clusters
+# Create Kubernetes secrets (TLS + MDS credentials) in both clusters
 ./create_secrets.sh
 ```
 
@@ -97,13 +99,25 @@ watch kubectl -n confluent --context kind-secondary get pods
 
 > **Tip**: This can take several minutes, especially the first time as images are pulled.
 
+### 7. Set Environment Variables
+
+Export all required environment variables with a single command:
+
+```bash
+source scripts/set-env.sh
+```
+
+This sets the TLS certificate paths and cluster IDs needed for the `confluent` CLI and Scenario 3.
+
 #### Access Control Center
 
 Add to `/etc/hosts`:
 
 ```
-127.0.0.1 controlcenter-ng.confluent.svc.cluster.local
+127.0.0.1 primary-control-plane secondary-control-plane controlcenter-ng.confluent.svc.cluster.local
 ```
+
+> **Why these entries?** `primary-control-plane` and `secondary-control-plane` are Docker container names used by Kind. Adding them to `/etc/hosts` makes them resolvable from your local machine, which is required for the `confluent` CLI and cross-cluster communication. The two clusters use different NodePort ranges (primary: 30080, 30092-30094; secondary: 30180, 30192-30194) to avoid port conflicts on the same loopback address.
 
 **Primary** (port 9021):
 
@@ -121,9 +135,43 @@ kubectl -n confluent --context kind-secondary port-forward svc/controlcenter-ng 
 
 > URL: [https://controlcenter-ng.confluent.svc.cluster.local:9022](https://controlcenter-ng.confluent.svc.cluster.local:9022)
 
+And, finally, give the `admin`user the appropriate permissions to manage the Clusters in both Control Centers:
+
+```bash
+# Primary cluster
+kubectl --context kind-primary apply -f infra/primary/rolebindings.yaml
+
+# Secondary cluster
+kubectl --context kind-secondary apply -f infra/secondary/rolebindings.yaml
+```
+
+> **Login credentials**: Use username `admin` and password `admin-secret`. See [MDS Users](#mds-users) for more details.
+
+#### Access via Confluent CLI
+
+> **Note**: Environment variables should already be set if you ran `source scripts/set-env.sh` in step 7. If you open a new terminal, re-run that command.
+
+Log in to the clusters using certificate-based authentication:
+
+```bash
+# Login to primary cluster MDS
+confluent login --url https://localhost:30080 --certificate-only
+
+# Login to secondary cluster MDS
+confluent login --url https://localhost:30180 --certificate-only
+```
+
+After login, you can manage the cluster. The `--url` flag points to the embedded Kafka REST API (primary: `30080/kafka`, secondary: `30180/kafka`):
+
+```bash
+confluent kafka topic list --url https://localhost:30080/kafka
+
+confluent kafka topic list --url https://localhost:30180/kafka
+```
+
 ---
 
-## 🚀 DR Demo Setup
+## DR Demo Setup
 
 ### 1. Deploy Topic, Schema, and Datagen Connector (Primary)
 
@@ -141,27 +189,35 @@ Verify the connector is running:
 kubectl -n confluent --context kind-primary get connector
 ```
 
+> **Scenario 3 users**: If you plan to run [Scenario 3: Bidirectional Cluster Linking with `truncate-and-restore`](Scenario3.md), skip directly to Scenario 3 now. It creates its own bidirectional cluster link and handles the remaining setup steps internally. Steps 2 and 3 below are only needed for Scenarios 1 and 2.
+
 ### 2. Setup Cluster Linking & Schema Linking (Secondary)
 
 Cluster metadata and topic data are mirrored via Kafka Cluster Linking. Schemas are mirrored via **Schema Linking**.
 
-The Primary cluster pushes schemas to the Secondary Schema Registry (NodePort `30081`) and Kafka data via NodePort `30092`.
+The Primary cluster pushes schemas to the Secondary Schema Registry (NodePort `30081`) and Kafka data via NodePort `30192`.
 
-1. **On Secondary cluster**, expose the Schema Registry, create the link, and **then deploy Connect**:
+1. **On Secondary cluster**, create the link and **then deploy Connect**:
 
-   *Note: usage of `connect-offsets` mirror topic requires that the topic exists before Connect starts. Therefore, we deploy Connect AFTER establishing the link.*
+   *Note: the `confluent.connect-offsets` mirror topic must exist before Connect starts. Therefore, we deploy Connect AFTER establishing the link.*
 
 ```bash
-# Expose SR for incoming replication
+# Create cluster link from primary to secondary
 kubectl -n confluent --context kind-secondary apply -f infra/secondary/cluster-link-rest-class.yaml
 kubectl -n confluent --context kind-secondary apply -f infra/secondary/cluster-link.yaml
 ```
 
-Wait until the connect topic is created in the secondary cluster, and then deploy Connect:
+Wait until the connect-offsets topic is created in the secondary cluster, and then deploy Connect:
 
 ```bash
-# Deploy Connect (deferred to ensure mirror topic usage)
+# Deploy Connect (deferred to ensure mirror topic exists)
 kubectl -n confluent --context kind-secondary apply -f infra/secondary/connect.yaml
+```
+
+As with the primary cluster, the deployment of the Connect cluster may take some time. Check the Control Center or watch the pods status with:
+
+```bash
+watch kubectl -n confluent --context kind-secondary get pods
 ```
 
 1. **On Primary cluster**, start the schema replication:
@@ -184,51 +240,69 @@ kubectl -n confluent --context kind-primary get schemaexporter
 
 If you now connect to the Control Center of the secondary cluster, you will see a "product-pageviews" topic with data coming from the primary cluster.
 
-### 4. DR Failover Simulation
-
-To simulate a disaster recovery scenario where the Primary cluster becomes unavailable, we will perform a failover to the Secondary cluster.
-
-The workflow involves:
-
-1. **Stop the primary cluster** (simulated outage).
-2. **Failover the topic** by deleting the Cluster Link, which promotes the mirror topic to a writable topic.
-3. **Deploy the connector** to the Secondary cluster to resume production.
-
-**Steps:**
-
-1. **Simulate Outage (Optional)**: Scale down the primary Kafka brokers to simulate a crash.
+You can also verify using the `confluent` CLI:
 
 ```bash
-kubectl -n confluent --context kind-primary scale statefulset/kafka --replicas=0
-```
+# Login to primary
+confluent login --url https://localhost:30080 --certificate-only
 
-1. **Trigger Failover**: Delete the Cluster Link CR. This stops mirroring and promotes `product-pageviews` to a read-write topic on the Secondary cluster.
+# List topics
+confluent kafka topic list --url https://localhost:30080/kafka
 
-```bash
-kubectl -n confluent --context kind-secondary delete -f infra/secondary/cluster-link.yaml
-```
-
-After some moments, the mirror icon will dissapear from the Topic details page in Control Center, and that means that the topics have transitioned from Mirror Topics to normal topics.
-
-1. **Start Production on Secondary**: Deploy the same Datagen connector configuration to the Secondary cluster.
-
-```bash
-kubectl -n confluent --context kind-secondary apply -f infra/datagen-connector.yaml
-```
-
-1. **Verify**: Check that data is being produced in the Secondary cluster.
-
-```bash
-kubectl -n confluent --context kind-secondary get connector
+# Consume some messages
+confluent kafka topic consume product-pageviews --from-beginning --limit 5 --url https://localhost:30080/kafka
 ```
 
 ---
 
-## 🧹 Cleanup
+## DR Scenarios
+
+After completing the DR Demo Setup above, you can explore the following disaster recovery scenarios. Each scenario assumes you have completed steps 1-3 of the DR Demo Setup and have a working primary cluster with data flowing and a secondary cluster mirroring via Cluster Linking and Schema Linking.
+
+> **Important**: Run only **one scenario at a time**. After completing a scenario, follow its cleanup section to restore the environment before attempting another scenario, or perform a full environment cleanup and start fresh.
+
+| Scenario | Description | Complexity |
+|----------|-------------|------------|
+| [Scenario 1: Failover and Stay](Scenario1.md) | Permanent failover from primary to secondary. The secondary becomes the new active cluster. | Low |
+| [Scenario 2: Failover and Failback (Operator-managed)](Scenario2.md) | Temporary failover to secondary, then failback to primary after recovery. All links managed via CfK CRs. | Medium |
+| [Scenario 3: Bidirectional Cluster Linking with `truncate-and-restore`](Scenario3.md) | Bidirectional cluster link using `confluent` CLI. Features `truncate-and-restore` for simplified failback (no manual topic deletion). | High |
+
+---
+
+## MDS Users
+
+The `confluent` CLI authenticates to MDS using the `kafka` mTLS certificate (configured via the `CONFLUENT_PLATFORM_CLIENT_CERT_PATH` / `CONFLUENT_PLATFORM_CLIENT_KEY_PATH` environment variables). No username or password is needed for CLI login.
+
+The following file-based MDS users are configured internally for KafkaRestClass bearer token authentication. They are **not** used for CLI login:
+
+| User | Password | Purpose |
+|------|----------|---------|
+| `admin` | `admin-secret` | Control Center UI login; fallback for username/password CLI login (if certificate login is unavailable) |
+| `kafka` | `kafka-secret` | Kafka REST API (used by KafkaRestClass for CfK-managed resources) |
+| `clusterlink` | `link-secret` | Remote cluster link REST operations |
+
+> **Note**: All Confluent Platform components authenticate to each other using mTLS certificates. The certificate CN is mapped to a principal via `principalMappingRules`. Core cluster principals (`kafka`, `kraftcontroller`, `admin`) and cross-cluster principals (`cluster-link`, `clusterlink`) are listed as `superUsers`. Other components (Schema Registry, Connect, REST Proxy, Control Center) get their permissions via CfK auto-generated `ConfluentRolebinding` CRs.
+
+---
+
+## Full Environment Cleanup
+
+Run the automated teardown script:
 
 ```bash
-kind delete cluster --name primary
-kind delete cluster --name secondary
-docker network rm kind-shared
-rm -rf certs/
+./scripts/teardown.sh
+```
+
+This will:
+
+- Stop all port-forward processes
+- Delete both Kind clusters
+- Remove the Docker network
+- Clean all generated certificates
+- Unset environment variables
+
+**Manual step**: You may also want to remove the `/etc/hosts` entries:
+
+```text
+127.0.0.1 primary-control-plane secondary-control-plane controlcenter-ng.confluent.svc.cluster.local
 ```

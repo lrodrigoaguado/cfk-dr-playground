@@ -23,6 +23,10 @@ spec:
     init: confluentinc/confluent-init-container:3.1.0
   tls:
     secretRef: connect-tls
+  authorization:
+    type: rbac
+    kafkaRestClassRef:
+      name: secondary-cluster-restclass
   build:
     type: onDemand
     onDemand:
@@ -44,11 +48,41 @@ spec:
       tls:
         enabled: true
       url: https://schemaregistry.confluent.svc.cluster.local:8081
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
   configOverrides:
     server:
+      - "rest.extension.classes=io.confluent.connect.security.ConnectSecurityExtension"
+      - "rest.servlet.initializor.classes=io.confluent.common.security.jetty.initializer.InstallBearerOrBasicSecurityHandler"
+      - "listeners.https.ssl.client.authentication=REQUIRED"
       - "sni.host.check.enabled=false"
       - "offset.storage.replication.factor=1"
       - "config.storage.replication.factor=1"
       - "status.storage.replication.factor=1"
       - "config.providers=file"
       - "config.providers.file.class=org.apache.kafka.common.config.provider.FileConfigProvider"
+      - "ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.metadata.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "metric.reporters=io.confluent.telemetry.reporter.TelemetryReporter"
+      - "confluent.telemetry.exporter._c3.type=http"
+      - "confluent.telemetry.exporter._c3.enabled=true"
+      - "confluent.telemetry.exporter._c3.metrics.include=io.confluent.connect.*"
+      - "confluent.telemetry.exporter._c3.client.base.url=https://controlcenter-ng.confluent.svc.cluster.local:9090/api/v1/otlp"
+      - "confluent.telemetry.exporter._c3.client.compression=gzip"
+      - "confluent.telemetry.exporter._c3.api.key=dummy"
+      - "confluent.telemetry.exporter._c3.api.secret=dummy"
+      - "confluent.telemetry.exporter._c3.buffer.pending.batches.max=80"
+      - "confluent.telemetry.exporter._c3.buffer.batch.items.max=4000"
+      - "confluent.telemetry.exporter._c3.buffer.inflight.submissions.max=10"
+      - "confluent.telemetry.metrics.collector.interval.ms=60000"
+      - "confluent.telemetry.remoteconfig._confluent.enabled=false"

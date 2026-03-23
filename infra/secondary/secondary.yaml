@@ -65,17 +65,29 @@ spec:
   podTemplate:
     resources:
       limits:
-        memory: 1024Mi
-        cpu: 500m
+        memory: 2048Mi
+        cpu: 1000m
       requests:
-        memory: 512Mi
-        cpu: 200m
+        memory: 1536Mi
+        cpu: 500m
   image:
     application: confluentinc/cp-server:8.1.0
     init: confluentinc/confluent-init-container:3.1.0
   dataVolumeCapacity: 10Gi
   tls:
     secretRef: kafka-tls
+  authorization:
+    type: rbac
+    superUsers:
+      - User:kafka
+      - User:kraftcontroller
+      - User:rest-class
+      - User:schemaregistry
+      - User:connect
+      - User:controlcenter-ng
+      - User:admin
+      - User:cluster-link
+      - User:clusterlink
   listeners:
     internal:
       authentication:
@@ -91,7 +103,55 @@ spec:
           - RULE:.*CN=([a-zA-Z0-9._-]*).*$/$1/,DEFAULT
       tls:
         enabled: true
+      externalAccess:
+        type: nodePort
+        nodePort:
+          host: secondary-control-plane
+          nodePortOffset: 30192
+  services:
+    mds:
+      tls:
+        enabled: true
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      externalAccess:
+        type: nodePort
+        nodePort:
+          host: secondary-control-plane
+          nodePortOffset: 30180
+      provider:
+        type: file
+        file:
+          secretRef: mds-file-users
+        mtls:
+          sslClientAuthentication: requested
+          principalMappingRules:
+            - "RULE:.*CN=([a-zA-Z0-9._-]*).*$/$1/"
+            - "DEFAULT"
+      impersonation:
+        admins:
+          - User:krp
+          - User:controlcenter-ng
+        protectedUsers:
+          - User:kafka
+          - User:kraftcontroller
+          - User:admin
+    kafkaRest:
+      externalAccess:
+        type: nodePort
+        nodePort:
+          host: secondary-control-plane
+          nodePortOffset: 30182
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
   dependencies:
+    kafkaRest:
+      authentication:
+        type: bearer
+        bearer:
+          secretRef: kafka-credential
     kRaftController:
       controllerListener:
         tls:
@@ -116,7 +176,11 @@ spec:
   configOverrides:
     server:
       - sni.host.check.enabled=false
+      - ssl.principal.mapping.rules=RULE:^CN=(.*?)(?:,.*)?$/$1/,DEFAULT
       - confluent.schema.registry.url=https://schemaregistry.confluent.svc.cluster.local:8081
+      - confluent.metadata.server.token.max.lifetime.ms=86400000
+      - confluent.metadata.server.ssl.client.authentication=REQUESTED
+      - confluent.metadata.server.ssl.principal.mapping.rules=RULE:^CN=(.*?)(?:,.*)?$/$1/,DEFAULT
       - metric.reporters=io.confluent.telemetry.reporter.TelemetryReporter
       - confluent.telemetry.exporter._c3.type=http
       - confluent.telemetry.exporter._c3.enabled=true
@@ -131,6 +195,11 @@ spec:
       - confluent.telemetry.metrics.collector.interval.ms=60000
       - confluent.telemetry.remoteconfig._confluent.enabled=false
       - confluent.consumer.lag.emitter.enabled=true
+      # Fix embedded REST API backend: use SSL (not SASL_SSL) to match TOKEN listener on port 9073
+      - kafka.rest.client.security.protocol=SSL
+      - kafka.rest.client.ssl.keystore.location=/mnt/sslcerts/keystore.jks
+      - kafka.rest.client.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}
+      - kafka.rest.client.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}
 ---
 apiVersion: platform.confluent.io/v1beta1
 kind: SchemaRegistry
@@ -147,10 +216,14 @@ spec:
     resources:
       limits:
         memory: 512Mi
-        cpu: 200m
+        cpu: 500m
       requests:
         memory: 256Mi
         cpu: 100m
+    probe:
+      startup:
+        failureThreshold: 30
+        periodSeconds: 10
   image:
     application: confluentinc/cp-schema-registry:8.1.0
     init: confluentinc/confluent-init-container:3.1.0
@@ -158,6 +231,17 @@ spec:
     secretRef: schemaregistry-tls
   authentication:
     type: mtls
+    mtls:
+      sslClientAuthentication: required
+  authorization:
+    type: rbac
+    kafkaRestClassRef:
+      name: secondary-cluster-restclass
+  externalAccess:
+    type: nodePort
+    nodePort:
+      host: secondary-control-plane
+      nodePortOffset: 30081
   dependencies:
     kafka:
       bootstrapEndpoint: kafka.confluent.svc.cluster.local:9071
@@ -165,15 +249,26 @@ spec:
         type: mtls
       tls:
         enabled: true
-  externalAccess:
-    type: nodePort
-    nodePort:
-      host: secondary-control-plane
-      nodePortOffset: 30081
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
   configOverrides:
     server:
       - "sni.host.check.enabled=false"
-      - "confluent.schema.linking.enable=true"
+      - "ssl.principal.mapping.rules=RULE:.*CN=([a-zA-Z0-9._-]*).*$$/$1/,DEFAULT"
+      - "confluent.schema.registry.auth.ssl.principal.mapping.rules=RULE:.*CN=([a-zA-Z0-9._-]*).*$$/$1/,DEFAULT"
+      - "kafkastore.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "kafkastore.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "kafkastore.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.metadata.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.schema.registry.auth.mechanism=SSL"
 ---
 apiVersion: platform.confluent.io/v1beta1
 kind: KafkaRestProxy
@@ -189,6 +284,13 @@ spec:
     secretRef: krp-tls
   authentication:
     type: mtls
+  authorization:
+    type: rbac
+    kafkaRestClassRef:
+      name: secondary-cluster-restclass
+  configOverrides:
+    server:
+      - sni.host.check.enabled=false
   podTemplate:
     resources:
       limits:
@@ -214,6 +316,14 @@ spec:
       tls:
         enabled: true
       url: https://schemaregistry.confluent.svc.cluster.local:8081
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
 ---
 apiVersion: platform.confluent.io/v1beta1
 kind: ControlCenter
@@ -236,9 +346,19 @@ spec:
   dataVolumeCapacity: 10Gi
   tls:
     secretRef: controlcenter-ng-tls
-  authentication:
-    type: mtls
+  authorization:
+    type: rbac
+    kafkaRestClassRef:
+      name: secondary-cluster-restclass
   dependencies:
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
     prometheusClient:
       url: https://controlcenter-ng.confluent.svc.cluster.local:9090
       authentication:
@@ -290,5 +410,13 @@ spec:
   configOverrides:
     server:
       - sni.host.check.enabled=False
-      - confluent.controlcenter.connect.cluster=connect|https://connect.confluent.svc.cluster.local:8083
       - confluent.controlcenter.internal.topics.replication=1
+      - "confluent.controlcenter.connect.connect.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.controlcenter.connect.connect.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.controlcenter.connect.connect.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.controlcenter.streams.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.controlcenter.streams.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.controlcenter.streams.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.metadata.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"

@@ -65,17 +65,29 @@ spec:
   podTemplate:
     resources:
       limits:
-        memory: 1024Mi
-        cpu: 500m
+        memory: 2048Mi
+        cpu: 1000m
       requests:
-        memory: 512Mi
-        cpu: 200m
+        memory: 1536Mi
+        cpu: 500m
   image:
     application: confluentinc/cp-server:8.1.0
     init: confluentinc/confluent-init-container:3.1.0
   dataVolumeCapacity: 10Gi
   tls:
     secretRef: kafka-tls
+  authorization:
+    type: rbac
+    superUsers:
+      - User:kafka
+      - User:kraftcontroller
+      - User:rest-class
+      - User:schemaregistry
+      - User:connect
+      - User:controlcenter-ng
+      - User:admin
+      - User:cluster-link
+      - User:clusterlink
   listeners:
     internal:
       authentication:
@@ -96,7 +108,50 @@ spec:
         nodePort:
           host: primary-control-plane
           nodePortOffset: 30092
+  services:
+    mds:
+      tls:
+        enabled: true
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      externalAccess:
+        type: nodePort
+        nodePort:
+          host: primary-control-plane
+          nodePortOffset: 30080
+      provider:
+        type: file
+        file:
+          secretRef: mds-file-users
+        mtls:
+          sslClientAuthentication: requested
+          principalMappingRules:
+            - "RULE:.*CN=([a-zA-Z0-9._-]*).*$/$1/"
+            - "DEFAULT"
+      impersonation:
+        admins:
+          - User:krp
+          - User:controlcenter-ng
+        protectedUsers:
+          - User:kafka
+          - User:kraftcontroller
+          - User:admin
+    kafkaRest:
+      externalAccess:
+        type: nodePort
+        nodePort:
+          host: primary-control-plane
+          nodePortOffset: 30082
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
   dependencies:
+    kafkaRest:
+      authentication:
+        type: bearer
+        bearer:
+          secretRef: kafka-credential
     kRaftController:
       controllerListener:
         tls:
@@ -118,21 +173,14 @@ spec:
         type: mtls
       tls:
         enabled: true
-  services:
-    kafkaRest:
-      externalAccess:
-        type: nodePort
-        nodePort:
-          host: primary-control-plane
-          nodePortOffset: 30082
-      authentication:
-        type: mtls
-      tls:
-        enabled: true
   configOverrides:
     server:
       - sni.host.check.enabled=false
+      - ssl.principal.mapping.rules=RULE:^CN=(.*?)(?:,.*)?$/$1/,DEFAULT
       - confluent.schema.registry.url=https://schemaregistry.confluent.svc.cluster.local:8081
+      - confluent.metadata.server.token.max.lifetime.ms=86400000
+      - confluent.metadata.server.ssl.client.authentication=REQUESTED
+      - confluent.metadata.server.ssl.principal.mapping.rules=RULE:^CN=(.*?)(?:,.*)?$/$1/,DEFAULT
       - metric.reporters=io.confluent.telemetry.reporter.TelemetryReporter
       - confluent.telemetry.exporter._c3.type=http
       - confluent.telemetry.exporter._c3.enabled=true
@@ -147,6 +195,10 @@ spec:
       - confluent.telemetry.metrics.collector.interval.ms=60000
       - confluent.telemetry.remoteconfig._confluent.enabled=false
       - confluent.consumer.lag.emitter.enabled=true
+      - kafka.rest.client.security.protocol=SSL
+      - kafka.rest.client.ssl.keystore.location=/mnt/sslcerts/keystore.jks
+      - kafka.rest.client.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}
+      - kafka.rest.client.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}
 ---
 apiVersion: platform.confluent.io/v1beta1
 kind: SchemaRegistry
@@ -163,10 +215,14 @@ spec:
     resources:
       limits:
         memory: 512Mi
-        cpu: 200m
+        cpu: 500m
       requests:
         memory: 256Mi
         cpu: 100m
+    probe:
+      startup:
+        failureThreshold: 30
+        periodSeconds: 10
   image:
     application: confluentinc/cp-schema-registry:8.1.0
     init: confluentinc/confluent-init-container:3.1.0
@@ -174,6 +230,17 @@ spec:
     secretRef: schemaregistry-tls
   authentication:
     type: mtls
+    mtls:
+      sslClientAuthentication: required
+  authorization:
+    type: rbac
+    kafkaRestClassRef:
+      name: primary-cluster-restclass
+  externalAccess:
+    type: nodePort
+    nodePort:
+      host: primary-control-plane
+      nodePortOffset: 30081
   dependencies:
     kafka:
       bootstrapEndpoint: kafka.confluent.svc.cluster.local:9071
@@ -181,10 +248,27 @@ spec:
         type: mtls
       tls:
         enabled: true
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
   configOverrides:
     server:
       - "sni.host.check.enabled=false"
-      - "confluent.schema.linking.enable=true"
+      - "ssl.principal.mapping.rules=RULE:.*CN=([a-zA-Z0-9._-]*).*$$/$1/,DEFAULT"
+      - "confluent.schema.registry.auth.ssl.principal.mapping.rules=RULE:.*CN=([a-zA-Z0-9._-]*).*$$/$1/,DEFAULT"
+      - "kafkastore.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "kafkastore.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "kafkastore.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.metadata.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.schema.registry.auth.mechanism=SSL"
+
 ---
 apiVersion: platform.confluent.io/v1beta1
 kind: Connect
@@ -211,6 +295,10 @@ spec:
     init: confluentinc/confluent-init-container:3.1.0
   tls:
     secretRef: connect-tls
+  authorization:
+    type: rbac
+    kafkaRestClassRef:
+      name: primary-cluster-restclass
   build:
     type: onDemand
     onDemand:
@@ -232,14 +320,44 @@ spec:
       tls:
         enabled: true
       url: https://schemaregistry.confluent.svc.cluster.local:8081
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
   configOverrides:
     server:
+      - "rest.extension.classes=io.confluent.connect.security.ConnectSecurityExtension"
+      - "rest.servlet.initializor.classes=io.confluent.common.security.jetty.initializer.InstallBearerOrBasicSecurityHandler"
+      - "listeners.https.ssl.client.authentication=REQUIRED"
       - "sni.host.check.enabled=false"
       - "offset.storage.replication.factor=1"
       - "config.storage.replication.factor=1"
       - "status.storage.replication.factor=1"
       - "config.providers=file"
       - "config.providers.file.class=org.apache.kafka.common.config.provider.FileConfigProvider"
+      - "ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.metadata.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "metric.reporters=io.confluent.telemetry.reporter.TelemetryReporter"
+      - "confluent.telemetry.exporter._c3.type=http"
+      - "confluent.telemetry.exporter._c3.enabled=true"
+      - "confluent.telemetry.exporter._c3.metrics.include=io.confluent.connect.*"
+      - "confluent.telemetry.exporter._c3.client.base.url=https://controlcenter-ng.confluent.svc.cluster.local:9090/api/v1/otlp"
+      - "confluent.telemetry.exporter._c3.client.compression=gzip"
+      - "confluent.telemetry.exporter._c3.api.key=dummy"
+      - "confluent.telemetry.exporter._c3.api.secret=dummy"
+      - "confluent.telemetry.exporter._c3.buffer.pending.batches.max=80"
+      - "confluent.telemetry.exporter._c3.buffer.batch.items.max=4000"
+      - "confluent.telemetry.exporter._c3.buffer.inflight.submissions.max=10"
+      - "confluent.telemetry.metrics.collector.interval.ms=60000"
+      - "confluent.telemetry.remoteconfig._confluent.enabled=false"
 ---
 apiVersion: platform.confluent.io/v1beta1
 kind: KafkaRestProxy
@@ -255,6 +373,10 @@ spec:
     secretRef: krp-tls
   authentication:
     type: mtls
+  authorization:
+    type: rbac
+    kafkaRestClassRef:
+      name: primary-cluster-restclass
   configOverrides:
     server:
       - sni.host.check.enabled=false
@@ -283,6 +405,14 @@ spec:
       tls:
         enabled: true
       url: https://schemaregistry.confluent.svc.cluster.local:8081
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
 ---
 apiVersion: platform.confluent.io/v1beta1
 kind: ControlCenter
@@ -305,9 +435,19 @@ spec:
   dataVolumeCapacity: 10Gi
   tls:
     secretRef: controlcenter-ng-tls
-  authentication:
-    type: mtls
+  authorization:
+    type: rbac
+    kafkaRestClassRef:
+      name: primary-cluster-restclass
   dependencies:
+    mds:
+      endpoint: https://kafka.confluent.svc.cluster.local:8090
+      tokenKeyPair:
+        secretRef: mds-token-keypair
+      authentication:
+        type: mtls
+      tls:
+        enabled: true
     prometheusClient:
       url: https://controlcenter-ng.confluent.svc.cluster.local:9090
       authentication:
@@ -359,5 +499,13 @@ spec:
   configOverrides:
     server:
       - sni.host.check.enabled=False
-      - confluent.controlcenter.connect.cluster=connect|https://connect.confluent.svc.cluster.local:8083
       - confluent.controlcenter.internal.topics.replication=1
+      - "confluent.controlcenter.connect.connect.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.controlcenter.connect.connect.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.controlcenter.connect.connect.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.controlcenter.streams.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.controlcenter.streams.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.controlcenter.streams.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.keystore.location=/mnt/sslcerts/keystore.jks"
+      - "confluent.metadata.ssl.keystore.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+      - "confluent.metadata.ssl.key.password=${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"

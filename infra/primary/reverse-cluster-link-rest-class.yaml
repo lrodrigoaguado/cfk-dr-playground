@@ -1,17 +1,15 @@
 apiVersion: platform.confluent.io/v1beta1
 kind: KafkaRestClass
 metadata:
-  name: secondary-cluster-restclass
+  name: secondary-remote-restclass
   namespace: confluent
 spec:
-  kafkaClusterRef:
-    name: kafka
-    namespace: confluent
   kafkaRest:
-    endpoint: https://kafka.confluent.svc.cluster.local:8090
+    endpoint: https://secondary-control-plane:30182
     authentication:
       type: bearer
       bearer:
-        secretRef: kafka-credential
+        secretRef: clusterlink-credential
     tls:
       secretRef: rest-class-tls
+    kafkaClusterID: "secondaryCluster-12345"

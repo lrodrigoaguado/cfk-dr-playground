@@ -42,7 +42,7 @@ keytool -noprompt -importcert \
 
 # --- 2. Component Certificate Generation ---
 # Loop through each component to generate its keystore and truststore
-for i in kraftcontroller kafka connect schemaregistry krp controlcenter-ng
+for i in kraftcontroller kafka connect schemaregistry krp controlcenter-ng cli-admin
 do
   echo ""
   echo "------------------------------- $i -------------------------------"
@@ -179,12 +179,34 @@ do
 done
 
 # Copy global truststore to all component directories
-for i in kraftcontroller kafka connect schemaregistry rest-class prometheus-client alertmanager-client prometheus alertmanager controlcenter-ng krp connector cluster-link
+for i in kraftcontroller kafka connect schemaregistry rest-class cli-admin prometheus-client alertmanager-client prometheus alertmanager controlcenter-ng krp connector cluster-link
 do
   cp global.truststore.jks ./$i/$i.truststore.jks
 done
 
 rm 1*.pem
 
+# --- 3.5 CLI Certificate Export ---
+# Extract the kafka private key to PEM for confluent CLI certificate-based authentication
 echo ""
-echo "🎉🎉 All certificates have been generated successfully."
+echo "------------------------------- CLI Certificate Export -------------------------------"
+openssl pkcs12 -in cli-admin/cli-admin.keystore.jks -nocerts -nodes \
+  -out cli-admin/cli-admin-key.pem -passin pass:confluent
+echo "✅ cli-admin private key exported to PEM for CLI use: cli-admin/cli-admin-key.pem"
+
+# --- 4. MDS Token Key Pair Generation ---
+echo ""
+echo "------------------------------- MDS Token Key Pair -------------------------------"
+mkdir -p mds
+
+# Generate RSA key pair for MDS token signing
+openssl genrsa -out mds/mds-tokenkeypair.pem 2048
+
+# Extract the public key
+openssl rsa -in mds/mds-tokenkeypair.pem -outform PEM -pubout -out mds/mds-publickey.pem
+
+echo ""
+echo "✅ MDS token key pair generated in directory: mds/"
+
+echo ""
+echo "🎉🎉 All certificates and MDS keys have been generated successfully."
