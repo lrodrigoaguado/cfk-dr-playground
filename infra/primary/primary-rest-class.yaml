@@ -8,7 +8,10 @@ spec:
     name: kafka
     namespace: confluent
   kafkaRest:
+    endpoint: https://kafka.confluent.svc.cluster.local:8090
     authentication:
-      type: mtls
+      type: bearer
+      bearer:
+        secretRef: kafka-credential
     tls:
       secretRef: rest-class-tls

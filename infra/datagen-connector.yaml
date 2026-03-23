@@ -6,6 +6,14 @@ metadata:
 spec:
   class: "io.confluent.kafka.connect.datagen.DatagenConnector"
   taskMax: 1
+  connectRest:
+    authentication:
+      type: bearer
+      bearer:
+        secretRef: kafka-credential
+      sslClientAuthentication: true
+    tls:
+      secretRef: connector-tls
   configs:
     kafka.topic: "product-pageviews"
     max.interval: "1000"
@@ -17,8 +25,15 @@ spec:
     value.converter: "io.confluent.connect.avro.AvroConverter"
     value.converter.schema.registry.url: "https://schemaregistry.confluent.svc.cluster.local:8081"
     value.converter.schema.registry.ssl.truststore.location: "/mnt/sslcerts/truststore.jks"
-    value.converter.schema.registry.ssl.truststore.password: "confluent"
+    value.converter.schema.registry.ssl.truststore.password: "${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
     value.converter.schema.registry.ssl.keystore.location: "/mnt/sslcerts/keystore.jks"
-    value.converter.schema.registry.ssl.keystore.password: "confluent"
+    value.converter.schema.registry.ssl.keystore.password: "${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+    value.converter.schema.registry.ssl.key.password: "${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+    producer.override.security.protocol: "SSL"
+    producer.override.ssl.keystore.location: "/mnt/sslcerts/keystore.jks"
+    producer.override.ssl.keystore.password: "${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+    producer.override.ssl.key.password: "${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
+    producer.override.ssl.truststore.location: "/mnt/sslcerts/truststore.jks"
+    producer.override.ssl.truststore.password: "${file:/mnt/sslcerts/jksPassword.txt:jksPassword}"
   connectClusterRef:
     name: connect

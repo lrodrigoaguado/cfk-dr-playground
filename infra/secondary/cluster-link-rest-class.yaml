@@ -7,7 +7,9 @@ spec:
   kafkaRest:
     endpoint: https://primary-control-plane:30082
     authentication:
-      type: mtls
+      type: bearer
+      bearer:
+        secretRef: clusterlink-credential
     tls:
       secretRef: rest-class-tls
     kafkaClusterID: "primaryCluster-1234567"

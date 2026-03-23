@@ -1,0 +1,192 @@
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: admin-kafka-systemadmin
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: admin
+  role: SystemAdmin
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: admin-sr-systemadmin
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: admin
+  role: SystemAdmin
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+    schemaRegistryClusterId: id_schemaregistry_confluent
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: admin-connect-systemadmin
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: admin
+  role: SystemAdmin
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+    connectClusterId: confluent.connect
+---
+# Following https://docs.confluent.io/operator/current/co-rbac.html#grant-role-to-ak-user-to-access-sr
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: kafka-sr-resourceowner
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: kafka
+  role: DeveloperRead
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+    schemaRegistryClusterId: id_schemaregistry_confluent
+  resourcePatterns:
+    - name: "*"
+      patternType: LITERAL
+      resourceType: Subject
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: kafka-connect-clusteradmin
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: kafka
+  role: ClusterAdmin
+  clustersScopeByIds:
+    connectClusterId: confluent.connect
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: connector-kafka-write
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: connector
+  role: DeveloperWrite
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+  resourcePatterns:
+    - name: product-pageviews
+      resourceType: Topic
+      patternType: LITERAL
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: connector-connect-sr-write
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: connector
+  role: ResourceOwner
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+    schemaRegistryClusterId: id_schemaregistry_confluent
+  resourcePatterns:
+    - name: product-pageviews-value
+      resourceType: Subject
+      patternType: LITERAL
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: connect-kafka-write
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: connect
+  role: DeveloperWrite
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+  resourcePatterns:
+    - name: product-pageviews
+      resourceType: Topic
+      patternType: LITERAL
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: connect-connect-sr-write
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: connect
+  role: ResourceOwner
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+    schemaRegistryClusterId: id_schemaregistry_confluent
+  resourcePatterns:
+    - name: product-pageviews-value
+      resourceType: Subject
+      patternType: LITERAL
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: cli-user-kafka-systemadmin
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: cli-admin
+  role: SystemAdmin
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+---
+apiVersion: platform.confluent.io/v1beta1
+kind: ConfluentRolebinding
+metadata:
+  name: c3-sr-systemadmin
+  namespace: confluent
+spec:
+  principal:
+    type: user
+    name: controlcenter-ng
+  role: SystemAdmin
+  kafkaRestClassRef:
+    name: primary-cluster-restclass
+  clustersScopeByIds:
+    kafkaClusterId: primaryCluster-1234567
+    schemaRegistryClusterId: id_schemaregistry_confluent

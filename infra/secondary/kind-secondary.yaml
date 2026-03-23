@@ -5,3 +5,16 @@ networking:
   disableDefaultCNI: false
 nodes:
   - role: control-plane
+    extraPortMappings:
+      - containerPort: 30180
+        hostPort: 30180
+      - containerPort: 30182
+        hostPort: 30182
+      - containerPort: 30192
+        hostPort: 30192
+      - containerPort: 30193
+        hostPort: 30193
+      - containerPort: 30194
+        hostPort: 30194
+      - containerPort: 30195
+        hostPort: 30195

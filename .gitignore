@@ -11,6 +11,14 @@
 .vscode/
 
 # Build and local state
-certs/
+certs/*
+!certs/ca/
+certs/ca/*
+!certs/ca/openssl-ca.cnf
 password-encoder.txt
 infra/password-encoder-secret.txt
+*.pdf
+
+# Claude
+.claude/
+CLAUDE.md
