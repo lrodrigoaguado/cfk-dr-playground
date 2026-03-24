@@ -330,7 +330,6 @@ Now that the Primary is in sync, use `reverse-and-start` to restore the original
 kafka-mirrors --bootstrap-server primary-control-plane:30092 \
   --command-config etc/scenario3/primary-client.properties \
   --reverse-and-start \
-  --topics product-pageviews,confluent.connect-offsets \
   --link bidirectional-link
 ```
 
