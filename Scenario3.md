@@ -23,10 +23,10 @@ Truncate:        Primary (mirror) ◄═════════ Secondary (sour
                       topics restored via truncate-and-restore
 
 Reverse:         Primary (source) ════════► Secondary (mirror)
-                      roles swapped via reverse-and-start-mirror
+                      roles swapped via reverse-and-start
 ```
 
-> **Why bidirectional?** The `truncate-and-restore` and `reverse-and-start-mirror` operations are **only available with bidirectional cluster links**. A bidirectional link enables both directions of data flow on a single link, making failover and failback significantly simpler than managing two separate unidirectional links.
+> **Why bidirectional?** The `truncate-and-restore` and `reverse-and-start` operations are **only available with bidirectional cluster links**. A bidirectional link enables both directions of data flow on a single link, making failover and failback significantly simpler than managing two separate unidirectional links.
 
 **Trade-offs**:
 
@@ -220,7 +220,7 @@ kafka-mirrors --bootstrap-server secondary-control-plane:30192 \
 
 The mirror topics should no longer appear (they are now regular topics). You can also verify in Control Center on the Secondary cluster -- the mirror icon should disappear from `product-pageviews`.
 
-> **Important**: Unlike `reverse-and-start-mirror`, the `failover` operation does **not** guarantee that all data has been replicated. Any records that were in-flight or not yet replicated at the time of the outage will be lost (this gap defines the RPO). The cluster link itself remains intact for later use with `truncate-and-restore`.
+> **Important**: Unlike `reverse-and-start`, the `failover` operation does **not** guarantee that all data has been replicated. Any records that were in-flight or not yet replicated at the time of the outage will be lost (this gap defines the RPO). The cluster link itself remains intact for later use with `truncate-and-restore`.
 
 ### Step 2.4: Deploy Connector on Secondary
 
@@ -248,7 +248,7 @@ When the Primary cluster recovers, `truncate-and-restore` simplifies the failbac
 2. **Converts** the Primary's topics back to mirror topics
 3. **Begins syncing** from the Secondary (now the active cluster)
 
-After the topics are synced, `reverse-and-start-mirror` swaps the roles back to the original topology.
+After the topics are synced, `reverse-and-start` swaps the roles back to the original topology.
 
 ### Step 3.1: Restore the Primary Cluster
 
@@ -351,7 +351,7 @@ kafka-mirrors --bootstrap-server secondary-control-plane:30192 \
 
 You should see `product-pageviews` and `confluent.connect-offsets` listed as `ACTIVE` mirror topics on the Secondary.
 
-> **Note**: The `reverse-and-start-mirror` operation achieves **RPO 0** because it ensures all data and consumer offsets are fully replicated before reversing the roles. This is why we wait for the mirror lag to reach zero before executing it.
+> **Note**: The `reverse-and-start` operation achieves **RPO 0** because it ensures all data and consumer offsets are fully replicated before reversing the roles. This is why we wait for the mirror lag to reach zero before executing it.
 
 ### Step 3.6: Restore Schema Exporter
 
@@ -393,7 +393,7 @@ kubectl -n confluent --context kind-primary apply -f infra/datagen-connector.yam
 ### Step 3.9: Verify
 Check Control Center on both clusters to confirm data is flowing from Primary to Secondary again.
 
-The environment is now fully restored to the original topology using `truncate-and-restore` and `reverse-and-start-mirror`, without any manual topic deletion.
+The environment is now fully restored to the original topology using `truncate-and-restore` and `reverse-and-start`, without any manual topic deletion.
 
 ---
 
@@ -416,7 +416,7 @@ The environment is now fully restored to the original topology using `truncate-a
 
 > **State Drift Risk**: If someone applies CfK `ClusterLink` CRs while CLI-managed links exist, the operator and manual configuration may conflict. Avoid mixing CfK-managed and CLI-managed cluster links on the same cluster.
 
-> **Bidirectional Link Requirement**: The `truncate-and-restore` and `reverse-and-start-mirror` operations are **only available with bidirectional cluster links** (`link.mode=BIDIRECTIONAL`). They will not work with standard unidirectional links.
+> **Bidirectional Link Requirement**: The `truncate-and-restore` and `reverse-and-start` operations are **only available with bidirectional cluster links** (`link.mode=BIDIRECTIONAL`). They will not work with standard unidirectional links.
 
 > **Consumer Group Conflicts**: The `truncate-and-restore` operation will be blocked if there are active consumers with conflicting consumer group IDs on the topics. Ensure all consumers (including connectors) are stopped before executing this operation.
 
