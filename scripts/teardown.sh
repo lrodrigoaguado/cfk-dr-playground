@@ -26,9 +26,21 @@ docker network rm kind-shared 2>/dev/null || echo "  Network not found"
 echo ""
 echo "Removing generated certificates..."
 if [ -d "certs" ]; then
-  rm -rf certs/*.pem certs/*.pem.attr
-  rm -rf certs/*/
-  echo "  ✓ Certificates removed"
+  # Remove PEM files from certs root
+  rm -rf certs/*.pem certs/*.pem.attr 2>/dev/null || true
+
+  # Remove all generated certificate subdirectories EXCEPT ca/
+  for dir in certs/*/; do
+    dirname=$(basename "$dir")
+    if [ "$dirname" != "ca" ]; then
+      rm -rf "$dir"
+    fi
+  done
+
+  # Clean up generated files inside ca/ directory but keep the directory and openssl-ca.cnf
+  rm -rf certs/ca/serial* certs/ca/index* certs/ca/certsdb* 2>/dev/null || true
+
+  echo "  ✓ Certificates removed (preserved ca/openssl-ca.cnf)"
 else
   echo "  No certificates directory found"
 fi
